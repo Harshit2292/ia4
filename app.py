@@ -119,12 +119,160 @@ def kpi_card(col, label, value, colour, sub=""):
     )
 
 # ═══════════════════════════════════════════════════════════════════
+# GENERATE DATA  (runs only if CSVs are missing — e.g. Streamlit Cloud)
+# ═══════════════════════════════════════════════════════════════════
+def generate_data():
+    """Create synthetic 2000-row dataset and save CSVs."""
+    os.makedirs("data", exist_ok=True)
+    np.random.seed(42)
+    N = 2000
+    personas = ["Urban_Salaried","Rural_Farmer","Gig_Worker","MSME_Owner","Homemaker","Retired_Govt"]
+    persona  = np.random.choice(personas, N, p=[0.30,0.15,0.20,0.18,0.10,0.07])
+
+    age         = np.random.randint(21, 65, N)
+    gender      = np.random.choice(["Male","Female","Other"], N, p=[0.55,0.43,0.02])
+    marital     = np.random.choice(["Single","Married","Divorced"], N, p=[0.35,0.58,0.07])
+    city_tier   = np.random.choice(["Tier1","Tier2","Tier3"], N, p=[0.35,0.38,0.27])
+    education   = np.random.choice(["Postgraduate","Graduate","Undergraduate","High School"], N, p=[0.18,0.42,0.28,0.12])
+    num_dep     = np.random.randint(0, 6, N)
+
+    emp_status  = np.random.choice(["Salaried","Self-Employed","Freelance","Unemployed"], N, p=[0.52,0.25,0.15,0.08])
+    yrs_emp     = np.clip(np.random.exponential(5, N).astype(int), 0, 35)
+    ann_income  = np.clip(np.random.lognormal(12.8, 0.7, N), 80_000, 5_000_000)
+    inc_stab    = np.random.choice(["Stable","Moderate","Volatile"], N, p=[0.45,0.35,0.20])
+    sec_income  = np.random.choice([0]*60 + list(np.random.randint(5000,80000,40)), N)
+
+    sav_pct     = np.clip(np.random.normal(18, 10, N), 0, 60)
+    sav_bal     = np.clip(ann_income * sav_pct/100 * np.random.uniform(0.5,3,N), 0, 2_000_000)
+    spending    = np.random.choice(["Conservative","Moderate","Liberal"], N, p=[0.30,0.45,0.25])
+    credit_util = np.clip(np.random.beta(2, 4, N), 0, 1)
+    upi_txn     = np.random.randint(0, 80, N)
+    has_cc      = np.random.randint(0, 2, N)
+    app_loan    = np.random.randint(0, 2, N)
+
+    loan_type   = np.random.choice(["Home","Personal","Vehicle","Gold","Education","None"], N, p=[0.18,0.25,0.14,0.10,0.08,0.25])
+    loan_purpose= np.random.choice(["Business","Education","Medical","Home","Vehicle","NA"], N, p=[0.20,0.15,0.10,0.22,0.13,0.20])
+    loan_amt    = np.clip(np.random.lognormal(12.5, 1.0, N), 10_000, 5_000_000)
+    loan_term   = np.random.choice([12,24,36,48,60,84,120,180,240], N)
+    exist_debt  = np.clip(np.random.lognormal(10.5, 1.2, N) * np.random.choice([0,1], N, p=[0.3,0.7]), 0, 3_000_000)
+    monthly_emi = exist_debt / np.where(loan_term==0, 36, loan_term)
+    dti         = np.clip((monthly_emi*12) / (ann_income + 1), 0, 3)
+
+    cred_hist   = np.clip(np.random.exponential(6, N), 0, 30).astype(int)
+    num_accts   = np.random.randint(1, 12, N)
+    hard_inq    = np.random.randint(0, 8, N)
+    missed_pay  = np.random.choice([0,0,0,1,1,2,3], N)
+    bankruptcies= np.random.choice([0,0,0,0,1,2], N)
+    rep_hist    = np.random.choice(["Excellent","Good","Fair","Poor"], N, p=[0.35,0.33,0.20,0.12])
+
+    has_prop    = np.random.randint(0, 2, N)
+    has_veh     = np.random.randint(0, 2, N)
+    inv_val     = np.clip(np.random.lognormal(10, 1.5, N) * np.random.choice([0,1], N, p=[0.4,0.6]), 0, 2_000_000)
+    emg_fund    = np.clip(np.random.exponential(3, N), 0, 12)
+
+    risk_tol    = np.random.choice(["Conservative","Moderate","Aggressive"], N, p=[0.35,0.40,0.25])
+    fin_lit     = np.clip(np.random.normal(5.5, 2.0, N), 1, 10)
+    has_fin_p   = np.random.randint(0, 2, N)
+    inc_shock   = np.random.choice([0,0,0,1], N)
+    family_burd = np.clip(num_dep * 0.15, 0, 1.5)
+
+    rep_map_    = {"Excellent":4,"Good":3,"Fair":2,"Poor":1}
+    rep_ord     = np.array([rep_map_[r] for r in rep_hist])
+    risk_score  = np.clip(missed_pay*0.25 + bankruptcies*0.40 + dti*0.20 + credit_util*0.15, 0, 3)
+    emi_inc     = np.clip(monthly_emi / (ann_income/12 + 1), 0, 3)
+    sav_debt    = np.clip(sav_bal / (exist_debt + 1), 0, 50)
+
+    # CreditScore
+    cs = (600
+          + (rep_ord - 2) * 30
+          + (1 - credit_util) * 80
+          - missed_pay * 40
+          - bankruptcies * 80
+          + cred_hist * 3
+          + fin_lit * 5
+          + has_prop * 20
+          + (sav_pct - 15) * 1.5
+          - dti * 50
+          + np.random.normal(0, 25, N))
+    cs = np.clip(cs, 300, 900).round(0)
+
+    approved = (
+        (cs >= 650).astype(int)
+        + (dti < 0.4).astype(int)
+        + (missed_pay == 0).astype(int)
+        + (rep_ord >= 3).astype(int)
+        - (bankruptcies > 0).astype(int)*2
+    )
+    approved = (approved >= 2).astype(int)
+    # add noise
+    flip = np.random.choice([0,1], N, p=[0.95,0.05])
+    approved = np.abs(approved - flip)
+
+    cs_band = pd.cut(cs, bins=[300,500,580,670,740,800,900],
+                     labels=["Poor","Below Avg","Fair","Good","Very Good","Exceptional"])
+    age_grp = pd.cut(age, bins=[18,25,35,45,55,65],
+                     labels=["18-25","26-35","36-45","46-55","56-65"])
+    inc_q   = pd.qcut(ann_income, 4, labels=["Q1","Q2","Q3","Q4"])
+    mkt_seg = np.where(cs>=740,"Prime", np.where(cs>=620,"Emerging","AtRisk"))
+    inc_log = np.log1p(ann_income)
+    lam_log = np.log1p(loan_amt)
+    approb  = np.clip((cs-300)/600 * 0.8 + approved*0.2, 0, 1)
+
+    raw_df = pd.DataFrame({
+        "RespondentID": [f"R{i:04d}" for i in range(1,N+1)],
+        "Persona":persona,"Age":age,"Gender":gender,"MaritalStatus":marital,
+        "CityTier":city_tier,"Education":education,"NumDependents":num_dep,
+        "EmploymentStatus":emp_status,"YearsEmployed":yrs_emp,
+        "AnnualIncome_INR":ann_income.round(2),"IncomeStability":inc_stab,
+        "SecondaryIncome_INR":sec_income,"SavingsPct_Monthly":sav_pct.round(2),
+        "SavingsBalance_INR":sav_bal.round(2),"SpendingPattern":spending,
+        "CreditUtilization":credit_util.round(4),"UPI_TxnMonthly":upi_txn,
+        "HasCreditCard":has_cc,"AppBasedLoan":app_loan,
+        "PrimaryLoanType":loan_type,"LoanPurpose_New":loan_purpose,
+        "LoanAmountSought":loan_amt.round(2),"LoanTermMonths":loan_term,
+        "ExistingDebt_INR":exist_debt.round(2),"MonthlyEMI_INR":monthly_emi.round(2),
+        "DebtToIncomeRatio":dti.round(4),"CreditHistoryYears":cred_hist,
+        "NumCreditAccounts":num_accts,"NumHardInquiries":hard_inq,
+        "MissedPayments":missed_pay,"Bankruptcies":bankruptcies,
+        "RepaymentHistory":rep_hist,"HasProperty":has_prop,"HasVehicle":has_veh,
+        "InvestmentValue_INR":inv_val.round(2),"EmergencyFundMonths":emg_fund.round(2),
+        "RiskTolerance":risk_tol,"FinLiteracyScore":fin_lit.round(2),
+        "HasFinancialPlan":has_fin_p,"IncomeShockLast3Yr":inc_shock,
+        "FamilyBurdenScore":family_burd.round(3),
+        "CreditScore":cs,"LoanApproved":approved,
+        "MarketingSegment":mkt_seg,"ApprovalProbability":approb.round(4),
+        "IncomeLog":inc_log.round(4),"LoanAmountLog":lam_log.round(4),
+        "EMI_to_Income":emi_inc.round(4),"SavingsToDebt":sav_debt.round(4),
+        "CreditScoreBand":cs_band.astype(str),"AgeGroup":age_grp.astype(str),
+        "IncomeQuartile":inc_q.astype(str),"RiskScore":risk_score.round(4),
+        "RepaymentHistory_Ord":rep_ord,
+    })
+
+    # label encode key cats
+    from sklearn.preprocessing import LabelEncoder
+    le = LabelEncoder()
+    for c in ["Gender","MaritalStatus","CityTier","Education","EmploymentStatus",
+              "IncomeStability","SpendingPattern","PrimaryLoanType","LoanPurpose_New",
+              "RepaymentHistory","RiskTolerance","MarketingSegment","Persona",
+              "CreditScoreBand","AgeGroup","IncomeQuartile"]:
+        raw_df[c+"_Enc"] = le.fit_transform(raw_df[c].astype(str))
+
+    clean_df = raw_df.copy()
+    raw_df.to_csv("raw_dataset_2000.csv", index=False)
+    clean_df.to_csv("cleaned_dataset.csv", index=False)
+    return clean_df, raw_df
+
+# ═══════════════════════════════════════════════════════════════════
 # DATA PREPARATION  (adds RepaymentHistory_Ord and other derived cols)
 # ═══════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner=False)
 def load_data():
-    df  = pd.read_csv("data/cleaned_dataset.csv")
-    raw = pd.read_csv("data/raw_dataset_2000.csv")
+    # Auto-generate CSVs if missing (Streamlit Cloud)
+    if not os.path.exists("cleaned_dataset.csv"):
+        with st.spinner("⏳ Generating dataset (~10s)..."):
+            generate_data()
+    df  = pd.read_csv("cleaned_dataset.csv")
+    raw = pd.read_csv("raw_dataset_2000.csv")
     # numeric fill
     nc = df.select_dtypes(include=np.number).columns
     df[nc] = df[nc].fillna(df[nc].median())
